@@ -1,5 +1,6 @@
 flask
+flask-cors
 torch
 torch-geometric
-networkx
+scikit-learn
 joblib
