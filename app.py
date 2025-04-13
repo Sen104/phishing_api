@@ -1,47 +1,105 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import torch
+import os
+
+from model.gmail_message import save_gmail_messages
+from model_loader import load_model, load_vectorizer
+from utils.graph_utils import email_to_pyg_graph
+from utils.version_tracker import get_model_version
 
 app = Flask(__name__)
-
-# ✅ Allow Gmail and Chrome Extension access
-CORS(app, origins=[
+CORS(app, resources={r"/*": {"origins": [
     "https://mail.google.com",
-    "chrome-extension://<YOUR_EXTENSION_ID>",  # Replace this with your actual ID
-    "https://shield-comms-fyp-t69w.vercel.app"  # Optional: if using Vercel frontend
-])
+    "chrome-extension://eefgbpahdglinbadkmmdelfkeclkkbjj"
+]}}, supports_credentials=True)
 
-# ✅ DUMMY ML PREDICTION ROUTE
+# Setup model and vectorizer
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = load_model(device)
+vectorizer = load_vectorizer()
+model_info = get_model_version()
+
+# Prediction route
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
-    email_text = data.get("email_text", "").strip()
+    email_text = data.get("email", "").strip()
 
-    if not email_text or email_text.lower() == "n/a":
+    # ✅ Updated skip logic — only skip if empty or whitespace
+    if not email_text.strip():
         return jsonify({
             "prediction": "Unknown",
             "phishing_probability": 0,
-            "safe_probability": 0
+            "safe_probability": 0,
+            "model_version": model_info["version_hash"],
+            "model_last_updated": model_info["last_updated"]
         })
 
-    # 🔄 Replace this block with your actual model inference later
-    return jsonify({
-        "prediction": "Phishing",
-        "phishing_probability": 72.3,
-        "safe_probability": 27.7
-    })
+    try:
+        graph = email_to_pyg_graph(email_text, label=0, vectorizer=vectorizer)
+        graph = graph.to(device)
+        batch = torch.zeros(graph.x.size(0), dtype=torch.long).to(device)
 
-# ✅ VERSION ROUTE FOR MODEL VERSION TRACKING
-@app.route("/version", methods=["GET"])
-def version():
-    return jsonify({
-        "version_hash": "v1.0.0"  # Replace with actual hash logic if needed
-    })
+        with torch.no_grad():
+            out = model(graph.x, graph.edge_index, batch)
+            probs = torch.softmax(out, dim=1).squeeze()
+            phishing_prob = round(probs[1].item() * 100, 2)
+            safe_prob = round(probs[0].item() * 100, 2)
+            label = "Phishing" if phishing_prob > safe_prob else "Safe"
 
-# ✅ Optional health check
-@app.route("/", methods=["GET"])
-def index():
-    return jsonify({"message": "ShieldComms API is live 🚀"})
+        return jsonify({
+            "prediction": label,
+            "phishing_probability": phishing_prob,
+            "safe_probability": safe_prob,
+            "model_version": model_info["version_hash"],
+            "model_last_updated": model_info["last_updated"]
+        })
 
-# ✅ Run locally for testing (optional)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Gmail logging route
+@app.route("/log/gmail", methods=["POST"])
+def log_gmail_messages():
+    try:
+        data = request.get_json()
+        if not data or "messages" not in data:
+            return {"error": "No messages provided"}, 400
+
+        inserted_ids = save_gmail_messages(data["messages"])
+        return {"message": "Messages logged", "ids": [str(_id) for _id in inserted_ids]}, 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Get all logged Gmail messages
+@app.route("/api/gmail/messages", methods=["GET"])
+def get_logged_gmail_messages():
+    try:
+        from model.gmail_message import gmail_messages_collection
+
+        messages = list(gmail_messages_collection.find().sort("fetched_at", -1))
+        for msg in messages:
+            msg["_id"] = str(msg["_id"])
+        return jsonify({"messages": messages}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Clear Gmail logs
+@app.route("/api/gmail/clear", methods=["DELETE"])
+def clear_gmail_logs():
+    try:
+        from model.gmail_message import gmail_messages_collection
+
+        result = gmail_messages_collection.delete_many({})
+        return jsonify({"message": f"Deleted {result.deleted_count} messages."}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Start server
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
