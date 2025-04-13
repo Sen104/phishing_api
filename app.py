@@ -1,49 +1,47 @@
 from flask import Flask, request, jsonify
-import torch
-from model_loader import load_model, load_vectorizer
-from utils.graph_utils import email_to_pyg_graph
 from flask_cors import CORS
-import os
 
 app = Flask(__name__)
-CORS(app)
 
+# ✅ Allow Gmail and Chrome Extension access
+CORS(app, origins=[
+    "https://mail.google.com",
+    "chrome-extension://<YOUR_EXTENSION_ID>",  # Replace this with your actual ID
+    "https://shield-comms-fyp-t69w.vercel.app"  # Optional: if using Vercel frontend
+])
 
-# Setup
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = load_model(device)
-vectorizer = load_vectorizer()
-
+# ✅ DUMMY ML PREDICTION ROUTE
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
-    email_text = data.get("email")
+    email_text = data.get("email_text", "").strip()
 
-    if not email_text:
-        return jsonify({"error": "Email text is required"}), 400
-
-    try:
-        graph = email_to_pyg_graph(email_text, label=0, vectorizer=vectorizer)
-        graph = graph.to(device)
-        batch = torch.zeros(graph.x.size(0), dtype=torch.long).to(device)
-
-        with torch.no_grad():
-            out = model(graph.x, graph.edge_index, batch)
-            probs = torch.softmax(out, dim=1).squeeze()
-            phishing_prob = round(probs[1].item() * 100, 2)
-            safe_prob = round(probs[0].item() * 100, 2)
-            label = "Phishing" if phishing_prob > safe_prob else "Safe"
-
+    if not email_text or email_text.lower() == "n/a":
         return jsonify({
-            "prediction": label,
-            "phishing_probability": phishing_prob,
-            "safe_probability": safe_prob
+            "prediction": "Unknown",
+            "phishing_probability": 0,
+            "safe_probability": 0
         })
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # 🔄 Replace this block with your actual model inference later
+    return jsonify({
+        "prediction": "Phishing",
+        "phishing_probability": 72.3,
+        "safe_probability": 27.7
+    })
 
+# ✅ VERSION ROUTE FOR MODEL VERSION TRACKING
+@app.route("/version", methods=["GET"])
+def version():
+    return jsonify({
+        "version_hash": "v1.0.0"  # Replace with actual hash logic if needed
+    })
+
+# ✅ Optional health check
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({"message": "ShieldComms API is live 🚀"})
+
+# ✅ Run locally for testing (optional)
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-
+    app.run(debug=True)
