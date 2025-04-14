@@ -1,13 +1,17 @@
 from pymongo import MongoClient
 import certifi
-import os
 
-# Replace with your actual MongoDB URI if not using env variable
-MONGODB_URI = os.getenv("MONGODB_URI", "your-mongodb+srv-uri")
+# ✅ Use your working URI directly (no need for os.getenv during deployment rush)
+MONGODB_URI = "mongodb+srv://phishuser:chan123uthi@phishguardclluster.xxfhlcp.mongodb.net/?retryWrites=true&w=majority&tls=true"
 
-# Connect using TLS/SSL with certifi bundle
-client = MongoClient(MONGODB_URI, tls=True, tlsCAFile=certifi.where())
+# ✅ Connect using TLS with certifi CA bundle
+client = MongoClient(
+    MONGODB_URI,
+    tls=True,
+    tlsAllowInvalidCertificates=False,
+    tlsCAFile=certifi.where()
+)
 
-# Use phishing database
+# ✅ Use phishing_db and collection
 db = client["phishing_db"]
 gmail_messages_collection = db["gmail_messages"]
