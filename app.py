@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import torch
 import os
+from datetime import datetime
 
 from model.gmail_message import save_gmail_messages
 from model_loader import load_model, load_vectorizer
@@ -26,7 +27,7 @@ def predict():
     data = request.get_json()
     email_text = data.get("email", "").strip()
 
-    # ✅ Updated skip logic — only skip if empty or whitespace
+    # Skip empty or whitespace
     if not email_text.strip():
         return jsonify({
             "prediction": "Unknown",
@@ -59,16 +60,27 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Gmail logging route
+# Gmail logging route (new version to log a single message)
 @app.route("/log/gmail", methods=["POST"])
-def log_gmail_messages():
+def log_single_gmail_message():
     try:
+        from model.gmail_message import gmail_messages_collection
         data = request.get_json()
-        if not data or "messages" not in data:
-            return {"error": "No messages provided"}, 400
 
-        inserted_ids = save_gmail_messages(data["messages"])
-        return {"message": "Messages logged", "ids": [str(_id) for _id in inserted_ids]}, 201
+        if not data or not all(k in data for k in ["email_text", "prediction", "phishing_probability", "safe_probability"]):
+            return {"error": "Missing required fields"}, 400
+
+        document = {
+            "email_text": data["email_text"],
+            "prediction": data["prediction"],
+            "phishing_probability": data["phishing_probability"],
+            "safe_probability": data["safe_probability"],
+            "source": "Gmail",
+            "fetched_at": datetime.utcnow()
+        }
+
+        result = gmail_messages_collection.insert_one(document)
+        return {"message": "Logged successfully", "id": str(result.inserted_id)}, 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -79,7 +91,7 @@ def get_logged_gmail_messages():
     try:
         from model.gmail_message import gmail_messages_collection
 
-        messages = list(gmail_messages_collection.find().sort("fetched_at", -1))
+        messages = list(gmail_messages_collection.find().sort("fetched_at", -1).limit(20))
         for msg in messages:
             msg["_id"] = str(msg["_id"])
         return jsonify({"messages": messages}), 200
