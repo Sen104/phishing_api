@@ -118,6 +118,15 @@ def clear_gmail_logs():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
+ # ----------------------------------------------
+# [Optional Feature – Not Active in Extension]
+# This route uses Gmail API to scan the full inbox
+# It requires OAuth2 and token access, which is setup
+# but blocked by Google's unverified app warning (Error 403)
+# Feature left here to demonstrate backend capability
+# and scalability planning for future verified use.
+# ----------------------------------------------   
+'''
 # Scanning Gmail Inbox    
 @app.route("/scan/inbox", methods=["POST"])
 def scan_full_gmail_inbox():
@@ -146,6 +155,7 @@ def scan_full_gmail_inbox():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+'''
 
 # Start server
 if __name__ == "__main__":
