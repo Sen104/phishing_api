@@ -48,7 +48,7 @@ def predict():
             safe_prob = round(probs[0].item() * 100, 2)
             label = "Phishing" if phishing_prob > safe_prob else "Safe"
 
-        # ✅ Save to MongoDB
+        # Save to MongoDB
         document = {
             "email_text": email_text,
             "prediction": label,
@@ -97,7 +97,7 @@ def log_single_gmail_message():
 @app.route("/api/gmail/messages", methods=["GET"])
 def get_logged_gmail_messages():
     try:
-        messages = list(gmail_messages_collection.find().sort("fetched_at", -1).limit(20))
+        messages = list(gmail_messages_collection.find().sort("fetched_at", -1).limit(5))
         for msg in messages:
             msg["_id"] = str(msg["_id"])
         return jsonify({"messages": messages}), 200
