@@ -1,3 +1,6 @@
+import requests
+from model.gmail_message import save_gmail_messages
+
 from flask import Flask, request, jsonify 
 from flask_cors import CORS
 import torch
@@ -111,6 +114,35 @@ def clear_gmail_logs():
     try:
         result = gmail_messages_collection.delete_many({})
         return jsonify({"message": f"Deleted {result.deleted_count} messages."}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+# Scanning Gmail Inbox    
+@app.route("/scan/inbox", methods=["POST"])
+def scan_full_gmail_inbox():
+    try:
+        access_token = request.json.get("access_token")
+        if not access_token:
+            return jsonify({"error": "Missing access_token"}), 400
+
+        # Step 1: Fetch up to 50 Gmail messages
+        gmail_api_url = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        params = {"maxResults": 50}
+
+        res = requests.get(gmail_api_url, headers=headers, params=params)
+        if not res.ok:
+            return jsonify({"error": "Failed to fetch Gmail message list"}), 500
+
+        messages = res.json().get("messages", [])
+        if not messages:
+            return jsonify({"message": "No messages found."}), 200
+
+        # Step 2: Use your smart logger to fetch, detect, log
+        save_gmail_messages(messages, access_token)
+
+        return jsonify({"message": f"Scanned and logged {len(messages)} messages."}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
