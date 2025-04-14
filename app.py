@@ -1,10 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify 
 from flask_cors import CORS
 import torch
 import os
 from datetime import datetime
 
-from model.gmail_message import save_gmail_messages
+from model.gmail_message import gmail_messages_collection
 from model_loader import load_model, load_vectorizer
 from utils.graph_utils import email_to_pyg_graph
 from utils.version_tracker import get_model_version
@@ -21,13 +21,12 @@ model = load_model(device)
 vectorizer = load_vectorizer()
 model_info = get_model_version()
 
-# Prediction route
+# Prediction route with MongoDB logging
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
     email_text = data.get("email", "").strip()
 
-    # Skip empty or whitespace
     if not email_text.strip():
         return jsonify({
             "prediction": "Unknown",
@@ -49,6 +48,17 @@ def predict():
             safe_prob = round(probs[0].item() * 100, 2)
             label = "Phishing" if phishing_prob > safe_prob else "Safe"
 
+        # ✅ Save to MongoDB
+        document = {
+            "email_text": email_text,
+            "prediction": label,
+            "phishing_probability": phishing_prob,
+            "safe_probability": safe_prob,
+            "source": "Gmail",
+            "fetched_at": datetime.utcnow()
+        }
+        gmail_messages_collection.insert_one(document)
+
         return jsonify({
             "prediction": label,
             "phishing_probability": phishing_prob,
@@ -60,13 +70,11 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Gmail logging route (new version to log a single message)
+# Gmail logging route (for manual logging if needed)
 @app.route("/log/gmail", methods=["POST"])
 def log_single_gmail_message():
     try:
-        from model.gmail_message import gmail_messages_collection
         data = request.get_json()
-
         if not data or not all(k in data for k in ["email_text", "prediction", "phishing_probability", "safe_probability"]):
             return {"error": "Missing required fields"}, 400
 
@@ -89,8 +97,6 @@ def log_single_gmail_message():
 @app.route("/api/gmail/messages", methods=["GET"])
 def get_logged_gmail_messages():
     try:
-        from model.gmail_message import gmail_messages_collection
-
         messages = list(gmail_messages_collection.find().sort("fetched_at", -1).limit(20))
         for msg in messages:
             msg["_id"] = str(msg["_id"])
@@ -103,8 +109,6 @@ def get_logged_gmail_messages():
 @app.route("/api/gmail/clear", methods=["DELETE"])
 def clear_gmail_logs():
     try:
-        from model.gmail_message import gmail_messages_collection
-
         result = gmail_messages_collection.delete_many({})
         return jsonify({"message": f"Deleted {result.deleted_count} messages."}), 200
 
